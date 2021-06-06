@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.lang.exception.ExceptionUtils;
 import org.slf4j.LoggerFactory;
+import org.web3j.abi.datatypes.Int;
 import org.web3j.contracts.token.ERC20BasicInterface;
 import org.web3j.contracts.token.ERC20Interface;
 import org.web3j.crypto.Credentials;
@@ -59,16 +60,17 @@ public class Harvest {
 
     public static Integer harvestIntervalInMinute = null;
 
+    public static Boolean isRedeposit = true;
 
     public static void init() {
-
         ConfigManager configManager = null;
         try {
-            configManager = new ConfigManager(false);
+            configManager = new ConfigManager(true);
         } catch (ConfigurationException e) {
             log.error("加载配置文件出错");
         }
         harvestIntervalInMinute = configManager.getInteger("harvestIntervalInMinute");
+        isRedeposit = configManager.getBoolean("isRedeposit");
         credentials = Credentials.create(configManager.getProperty("privateKey"));
 
         StaticGasProvider provider = new StaticGasProvider(
@@ -89,6 +91,7 @@ public class Harvest {
         );
     }
 
+
     public static void harvest() throws Exception {
         String harvest =
                 masterChef.deposit(BigInteger.valueOf(POOL), BigInteger.ZERO).send().getTransactionHash();
@@ -99,33 +102,15 @@ public class Harvest {
         //1. 1/2的maki卖成ht组lp
         BigInteger amount = maki.balanceOf(credentials.getAddress()).send();
         BigInteger swapMakiAmount = amount.divide(BigInteger.valueOf(2L));
-        List<String> paths = Arrays.asList(
-                "5fad6fbba4bba686ba9b8052cf0bd51699f38b93",
-                "5545153ccfca01fbd7dd11c0b23ba694d9509a6f"
-        );
-        List<BigInteger> amounts = (List<BigInteger>)router.getAmountsOut(swapMakiAmount, paths).send();
-        Tuple3<BigInteger, BigInteger, BigInteger> reverses = pair.getReserves().send();
-        BigInteger requireHtAmount =
-                new BigDecimal(
-                    router.quote(swapMakiAmount, reverses.component2(), reverses.component1()).send()
-                ).multiply(BigDecimal.valueOf(0.98))
-                .toBigInteger();
-        String swapHash = router.swapExactTokensForHT(swapMakiAmount, requireHtAmount,
-                paths,
-                credentials.getAddress(),
-                new BigInteger("fffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
-        ).send().getTransactionHash();
-        log.info("swap maki for ht: {}...", swapHash);
+        sellMaki(swapMakiAmount);
 
         //2.组成lp
         BigInteger poolMakiAmount =  pair.getReserves().send().component2();
         amount = maki.balanceOf(credentials.getAddress()).send();
-        BigInteger mintLpAmount = new BigDecimal(amount).multiply(new BigDecimal("0.98")).toBigInteger();
 
         BigInteger minHtAmount = new BigDecimal(router
                 .quote(amount, poolMakiAmount, pair.getReserves().send().component1()).send())
                 .toBigInteger();
-
 
         String addLiquidHash = router.addLiquidityHT(MAKI_ADDR, amount, amount,
                 minHtAmount,
@@ -134,8 +119,6 @@ public class Harvest {
                 ).send().getTransactionHash();
         log.info("add liquid: {}...", addLiquidHash);
 
-
-
         //3.复投
         String depositHash = masterChef.deposit(BigInteger.valueOf(POOL), pair.balanceOf(credentials.getAddress()).send())
                 .send().getTransactionHash();
@@ -143,19 +126,43 @@ public class Harvest {
 
     }
 
+    public static String sellMaki(BigInteger swapMakiAmount) throws Exception {
+        List<String> paths = Arrays.asList(
+                "5fad6fbba4bba686ba9b8052cf0bd51699f38b93",
+                "5545153ccfca01fbd7dd11c0b23ba694d9509a6f"
+        );
+        Tuple3<BigInteger, BigInteger, BigInteger> reverses = pair.getReserves().send();
+        BigInteger requireHtAmount =
+                new BigDecimal(
+                        router.quote(swapMakiAmount, reverses.component2(), reverses.component1()).send()
+                ).multiply(BigDecimal.valueOf(0.98))
+                        .toBigInteger();
+        String swapHash = router.swapExactTokensForHT(swapMakiAmount, requireHtAmount,
+                paths,
+                credentials.getAddress(),
+                new BigInteger("fffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+        ).send().getTransactionHash();
+        log.info("swap maki for ht: {}...", swapHash);
+        return swapHash;
+    }
+
     public static void scheduleTask() {
         int i = 0;
         while (true) {
             try {
                 log.info("loop id: {}", i);
+                init();
                 harvest();
-                autoReDeposit();
+                if (isRedeposit) {
+                    autoReDeposit();
+                } else {
+                    sellMaki(maki.balanceOf(credentials.getAddress()).send());
+                }
                 Thread.sleep(1000 * 60 * harvestIntervalInMinute);
                 i ++;
             } catch (Exception e) {
                 e.printStackTrace();
             }
-
         }
     }
 
