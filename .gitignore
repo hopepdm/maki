@@ -1,5 +1,4 @@
 # Package Files #
-*.jar
 *.war
 *.nar
 *.ear
@@ -27,7 +26,12 @@
 *.ipr
 /out/
 /lib/
-/target/
+/target/classes/
+/target/generated-sources/
+/target/generated-test-sources/
+/target/maven-archiver/
+/target/maven-status/
+/target/test-classes/
 /log/
 .DS_Store
 
