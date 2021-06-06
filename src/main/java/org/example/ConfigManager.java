@@ -26,11 +26,8 @@ public class ConfigManager {
         try {
             log.info("开始初始化ConfigurationManager===================== ");
             SystemConfiguration sysConfig = new SystemConfiguration();
-            String globalPath = sysConfig.getString(GLOBAL_CONFIG_PATH);
+            String globalPath = System.getProperty(GLOBAL_CONFIG_PATH);
             log.info("globalPath=======================  " + globalPath);
-            if (StringUtils.isBlank(globalPath)) {
-                globalPath = Thread.currentThread().getContextClassLoader().getResource("conf.properties").getFile();
-            }
             BASE_PATH = globalPath;
         } catch (Exception e) {
             log.error("加载配置文件错误");
